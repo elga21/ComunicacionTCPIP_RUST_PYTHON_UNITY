@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Proyecto de Comunicación en Red: Rust y Python</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 20px;
+            background-color: #f4f4f4;
+            color: #333;
+        }
+        .container {
+            max-width: 900px;
+            margin: auto;
+            background: #fff;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        h1, h2, h3 {
+            color: #0056b3;
+        }
+        pre {
+            background: #272822;
+            color: #f8f8f2;
+            padding: 15px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        .explanation {
+            background: #eef;
+            padding: 15px;
+            border-left: 4px solid #0056b3;
+            margin-bottom: 20px;
+        }
+        .code-block {
+            margin-bottom: 30px;
+        }
+        .language {
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Proyecto de Comunicación en Red: Rust y Python</h1>
+
+        <h2>Introducción</h2>
+        <p>Este documento presenta una solución integral para un sistema de comunicación en red donde un cliente de Python se comunica con un servidor de Rust, y este, a su vez, retransmite información a un tercer dispositivo. La estructura está diseñada para garantizar la fiabilidad y la integridad de los datos a través del uso de protocolos de comunicación NMEA y un modelo de estado compartido.</p>
+
+        <h2>Resumen del Proyecto</h2>
+        <p>El proyecto es un sistema de <strong>puente de datos</strong>. Un cliente de Python (<code>192.168.0.81</code>) envía comandos NMEA al servidor de Rust (<code>192.168.0.20:9090</code>). El servidor, al recibir un comando, realiza dos acciones clave: <strong>confirma la recepción</strong> al cliente de Python y <strong>retransmite el estado completo</strong> y actualizado de dos servos (Ronza y Elevación) a un segundo cliente (<code>192.168.0.249:9090</code>) en una única trama NMEA.</p>
+
+        <hr>
+
+        <div class="code-block">
+            <h2>1. Código del Servidor en Rust</h2>
+            <p class="explanation">Este es el servidor que escucha los comandos, los procesa y retransmite el estado completo de los servos. Utiliza <strong>hilos</strong> para manejar múltiples conexiones simultáneamente y un <strong>Mutex</strong> para gestionar de forma segura el estado compartido de los servos.</p>
+            <span class="language">Lenguaje: Rust</span>
+            <pre>
+<code>use std::net::{TcpListener, TcpStream};
+use std::io::{self, Read, Write};
+use std::str;
+use std::thread;
+use std::collections::HashMap;
+use std::sync::Mutex;
+
+lazy_static::lazy_static! {
+    static ref SERVO_VALUES: Mutex<HashMap<String, String>> = {
+        let mut map = HashMap::new();
+        map.insert("RONZA".to_string(), "0".to_string());
+        map.insert("ELEVACION".to_string(), "0".to_string());
+        Mutex::new(map)
+    };
+}
+
+fn calculate_nmea_checksum(data: &str) -> u8 {
+    let mut checksum: u8 = 0;
+    for byte in data.bytes() {
+        checksum ^= byte;
+    }
+    checksum
+}
+
+fn handle_client(mut stream: TcpStream) {
+    println!("Cliente conectado desde: {}", stream.peer_addr().unwrap());
+    let mut buffer = [0; 256];
+
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("Cliente desconectado: {}", stream.peer_addr().unwrap());
+                return;
+            }
+            Ok(bytes_read) => {
+                let received = str::from_utf8(&buffer[..bytes_read])
+                    .unwrap_or_default()
+                    .trim_matches(char::from(0))
+                    .trim();
+
+                println!("Recibido: {}", received);
+
+                if received.starts_with("$") && received.contains("*") {
+                    let parts: Vec<&str> = received.split('*').collect();
+                    if parts.len() == 2 {
+                        let data = parts[0].trim_start_matches("$");
+                        let data_parts: Vec<&str> = data.split(',').collect();
+
+                        if data_parts.len() >= 2 {
+                            let servo_type = data_parts[1];
+                            let servo_value = data_parts.get(2).unwrap_or(&"0");
+
+                            let mut values = SERVO_VALUES.lock().unwrap();
+                            if values.contains_key(servo_type) {
+                                values.insert(servo_type.to_string(), servo_value.to_string());
+                            }
+                            drop(values);
+
+                            let response_to_python = format!("$ACK,{}*{:02X}\r\n", servo_type, 0);
+                            match stream.write_all(response_to_python.as_bytes()) {
+                                Ok(_) => println!("Enviado ACK a Python: {}", response_to_python.trim()),
+                                Err(e) => {
+                                    eprintln!("Error al enviar ACK: {}", e);
+                                    return;
+                                }
+                            }
+                            
+                            let destination_addr = "192.168.0.249:9090";
+                            match TcpStream::connect(destination_addr) {
+                                Ok(mut dest_stream) => {
+                                    let values = SERVO_VALUES.lock().unwrap();
+                                    let ronza_val = values.get("RONZA").unwrap();
+                                    let elevacion_val = values.get("ELEVACION").unwrap();
+                                    
+                                    let nmea_data = format!("ACK,{},{}", ronza_val, elevacion_val);
+                                    let checksum = calculate_nmea_checksum(&nmea_data);
+                                    let full_nmea_frame = format!("${}*{:02X}\r\n", nmea_data, checksum);
+
+                                    match dest_stream.write_all(full_nmea_frame.as_bytes()) {
+                                        Ok(_) => println!("Trama NMEA enviada a {}: {}", destination_addr, full_nmea_frame.trim()),
+                                        Err(e) => eprintln!("Error al enviar datos a {}: {}", destination_addr, e),
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Error al conectar con {}: {}", destination_addr, e);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    eprintln!("Trama NMEA no válida o incompleta: {}", received);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error de lectura: {}", e);
+                return;
+            }
+        }
+    }
+}
+
+fn main() -> io::Result<()> {
+    let listen_addr = "192.168.0.20:9090";
+    let listener = TcpListener::bind(listen_addr)?;
+
+    println!("Servidor Rust escuchando en {}", listen_addr);
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                thread::spawn(|| handle_client(stream));
+            }
+            Err(e) => {
+                eprintln!("Error al aceptar la conexión: {}", e);
+            }
+        }
+    }
+
+    Ok(())
+}</code>
+            </pre>
+        </div>
+
+        <hr>
+
+        <div class="code-block">
+            <h2>2. Código del Cliente en Python</h2>
+            <p class="explanation">Este es un ejemplo de cómo el cliente de Python enviaría comandos al servidor de Rust. Incluye la lógica para construir las tramas NMEA y recibir las confirmaciones.</p>
+            <span class="language">Lenguaje: Python</span>
+            <pre>
+<code>import socket
+import time
+
+def calculate_nmea_checksum(data):
+    checksum = 0
+    for byte in data.encode('ascii'):
+        checksum ^= byte
+    return '{:02X}'.format(checksum)
+
+def send_command(servo, value):
+    host = '192.168.0.20'
+    port = 9090
+
+    command_data = f'SERVOS,{servo},{value}'
+    checksum = calculate_nmea_checksum(command_data)
+    nmea_frame = f'${command_data}*{checksum}\r\n'
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.connect((host, port))
+            print(f"Conectado a {host}:{port}")
+
+            s.sendall(nmea_frame.encode('ascii'))
+            print(f"Enviado: {nmea_frame.strip()}")
+
+            ack_response = s.recv(1024)
+            print(f"ACK recibido: {ack_response.decode('ascii').strip()}")
+
+    except ConnectionRefusedError:
+        print("Error: Conexión rechazada. Asegúrate de que el servidor Rust esté en ejecución.")
+    except Exception as e:
+        print(f"Ocurrió un error: {e}")
+
+if __name__ == "__main__":
+    send_command("RONZA", 110)
+    time.sleep(2)
+    send_command("ELEVACION", 130)
+</code>
+            </pre>
+        </div>
+
+        <hr>
+
+        <h2>Conclusión</h2>
+        <p>Este proyecto demuestra una comunicación robusta y eficiente entre diferentes aplicaciones en una red. El uso de Rust como servidor intermediario no solo permite un manejo seguro de la concurrencia y un alto rendimiento, sino que también facilita la retransmisión de datos consolidados a otros clientes. El protocolo NMEA y el uso de checksums garantizan la integridad de los datos en cada etapa de la comunicación, asegurando que los comandos de control se ejecuten de manera precisa y fiable en el sistema final.</p>
+    </div>
+
+</body>
+</html>

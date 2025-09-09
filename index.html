@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Diagrama de Condiciones – Proyecto DT12</title>
+<style>
+  :root{
+    --bg:#0b1020; --fg:#e6eefc; --muted:#9fb2d9; --accent:#49c; --ok:#3cb371; --warn:#f0ad4e; --err:#e74c3c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--fg); background:linear-gradient(180deg,#0b1020,#0e1430 60%,#0b1020)}
+  header{padding:24px 20px 8px; border-bottom:1px solid rgba(255,255,255,.08)}
+  h1{margin:0 0 6px; font-size:clamp(18px,2.4vw,28px); letter-spacing:.2px}
+  .sub{color:var(--muted); font-size:clamp(12px,1.4vw,14px)}
+  .legend{display:flex; gap:12px; flex-wrap:wrap; margin-top:10px}
+  .chip{display:inline-flex; align-items:center; gap:8px; padding:6px 10px; border:1px solid rgba(255,255,255,.12); border-radius:999px; color:var(--muted); background:rgba(255,255,255,.03)}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .ok{background:var(--ok)} .warn{background:var(--warn)} .err{background:var(--err)} .acc{background:var(--accent)}
+  main{padding:24px;}
+  .card{max-width:1200px;margin:0 auto; background:rgba(255,255,255,.04); border:1px solid rgba(255,255,255,.08); border-radius:16px; box-shadow:0 10px 30px rgba(0,0,0,.25); padding:16px}
+  .hint{color:var(--muted); font-size:13px; margin:6px 2px 12px}
+  svg{width:100%; height:auto; display:block}
+  .node text{font-size:13px; fill:var(--fg)}
+  .small{font-size:12px; fill:var(--muted)}
+  .box{fill:rgba(255,255,255,.06); stroke:#7aa2e3; stroke-width:1.5}
+  .decision{fill:rgba(255,255,255,.06); stroke:#f6d365; stroke-width:1.8}
+  .terminator{fill:rgba(60,179,113,.12); stroke:#3cb371; stroke-width:1.8}
+  .error{fill:rgba(231,76,60,.10); stroke:#e74c3c; stroke-width:1.8}
+  .arrow{stroke:#9fb2d9; stroke-width:1.6; fill:none; marker-end:url(#arrow)}
+  .arrow-ok{stroke:var(--ok); stroke-width:1.8; fill:none; marker-end:url(#arrowOk)}
+  .arrow-err{stroke:var(--err); stroke-width:1.8; fill:none; marker-end:url(#arrowErr)}
+  .label{fill:var(--muted); font-size:12px; paint-order:stroke; stroke:#0b1020; stroke-width:3px;}
+  .kbd{font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:12px; background:rgba(255,255,255,.06); border:1px solid rgba(255,255,255,.12); padding:1px 4px; border-radius:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Diagrama de Condiciones – Proyecto DT12 (Python ⇆ Rust ⇆ Unity)</h1>
+  <div class="sub">Flujo de decisiones desde la UI (Python) hasta la respuesta (Unity), con casos de éxito, error y <span class="kbd">TIMEOUT = 5s</span>.</div>
+  <div class="legend">
+    <span class="chip"><span class="dot acc"></span>Transición</span>
+    <span class="chip"><span class="dot ok"></span>Éxito</span>
+    <span class="chip"><span class="dot warn"></span>Decisión</span>
+    <span class="chip"><span class="dot err"></span>Error / Timeout</span>
+  </div>
+</header>
+<main>
+  <div class="card">
+    <div class="hint">Notas: La trama sigue el formato <span class="kbd">TIPO,EJE,VALOR*CHECKSUM\r\n</span>. Ejemplos: <span class="kbd">SERVOS,RONZA,120*5A</span>, <span class="kbd">SERVOS,ELEVACION,60*3F</span>, <span class="kbd">SPEED,SPEED,50*6B</span>. ACK de retorno: <span class="kbd">ACK,RONZA*XX</span>.</div>
+    <!-- Responsive SVG flowchart -->
+    <svg viewBox="0 0 1200 1800" role="img" aria-label="Diagrama de condiciones del proyecto DT12">
+      <defs>
+        <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,3 L0,6 z" fill="#9fb2d9" />
+        </marker>
+        <marker id="arrowOk" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,3 L0,6 z" fill="#3cb371" />
+        </marker>
+        <marker id="arrowErr" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth">
+          <path d="M0,0 L10,3 L0,6 z" fill="#e74c3c" />
+        </marker>
+      </defs>
+
+      <!-- Row 1 -->
+      <g class="node" transform="translate(450,40)">
+        <rect class="terminator" rx="12" ry="12" width="300" height="60" />
+        <text x="150" y="36" text-anchor="middle">Inicio / Usuario interactúa en UI</text>
+      </g>
+
+      <!-- Row 2 -->
+      <g class="node" transform="translate(450,140)">
+        <rect class="box" rx="12" ry="12" width="300" height="80" />
+        <text x="150" y="32" text-anchor="middle">Generar trama NMEA</text>
+        <text class="small" x="150" y="56" text-anchor="middle">TIPO,EJE,VALOR*CHK</text>
+      </g>
+
+      <!-- Row 3 Decision: conexión Python→Rust -->
+      <g class="node" transform="translate(450,260)">
+        <polygon class="decision" points="150,0 300,50 150,100 0,50" />
+        <text x="150" y="40" text-anchor="middle">¿Conexión TCP</text>
+        <text x="150" y="62" text-anchor="middle">Python → Rust?</text>
+      </g>
+
+      <!-- Error: no conectado -->
+      <g class="node" transform="translate(80,250)">
+        <rect class="error" rx="12" ry="12" width="260" height="120" />
+        <text x="130" y="46" text-anchor="middle">Error: No conectado</text>
+        <text class="small" x="130" y="72" text-anchor="middle">Mostrar mensaje en UI</text>
+      </g>
+
+      <!-- Row 4: Envío a Rust -->
+      <g class="node" transform="translate(450,400)">
+        <rect class="box" rx="12" ry="12" width="300" height="80" />
+        <text x="150" y="34" text-anchor="middle">Enviar trama a Rust</text>
+        <text class="small" x="150" y="58" text-anchor="middle">TCP/IP (Ethernet/WiFi según topología)</text>
+      </g>
+
+      <!-- Decision: Rust recibió -->
+      <g class="node" transform="translate(450,520)">
+        <polygon class="decision" points="150,0 300,50 150,100 0,50" />
+        <text x="150" y="40" text-anchor="middle">¿Rust recibió</text>
+        <text x="150" y="62" text-anchor="middle">y parseó la trama?</text>
+      </g>
+
+      <!-- Error: fallo recepción en Rust -->
+      <g class="node" transform="translate(80,510)">
+        <rect class="error" rx="12" ry="12" width="260" height="120" />
+        <text x="130" y="46" text-anchor="middle">Error recepción en Rust</text>
+        <text class="small" x="130" y="72" text-anchor="middle">Notificar a UI / reintentar</text>
+      </g>
+
+      <!-- Reenvío a Unity -->
+      <g class="node" transform="translate(450,660)">
+        <rect class="box" rx="12" ry="12" width="300" height="80" />
+        <text x="150" y="32" text-anchor="middle">Reenviar a Unity (DT12)</text>
+        <text class="small" x="150" y="56" text-anchor="middle">Rust actúa como cliente TCP → Unity</text>
+      </g>
+
+      <!-- Decision: checksum válido en Unity -->
+      <g class="node" transform="translate(450,780)">
+        <polygon class="decision" points="150,0 300,50 150,100 0,50" />
+        <text x="150" y="40" text-anchor="middle">¿Trama válida</text>
+        <text x="150" y="62" text-anchor="middle">(checksum OK)?</text>
+      </g>
+
+      <!-- NACK path -->
+      <g class="node" transform="translate(80,770)">
+        <rect class="error" rx="12" ry="12" width="260" height="130" />
+        <text x="130" y="50" text-anchor="middle">NACK a Rust</text>
+        <text class="small" x="130" y="76" text-anchor="middle">UI muestra error de trama</text>
+      </g>
+
+      <!-- Movimiento -->
+      <g class="node" transform="translate(450,920)">
+        <rect class="box" rx="12" ry="12" width="300" height="84" />
+        <text x="150" y="36" text-anchor="middle">Mover torreta</text>
+        <text class="small" x="150" y="60" text-anchor="middle">Ronza / Elevación según VALOR</text>
+      </g>
+
+      <!-- ACK Unity → Rust -->
+      <g class="node" transform="translate(450,1040)">
+        <rect class="box" rx="12" ry="12" width="300" height="80" />
+        <text x="150" y="32" text-anchor="middle">Unity envía ACK a Rust</text>
+        <text class="small" x="150" y="56" text-anchor="middle">Ej.: ACK,RONZA*XX</text>
+      </g>
+
+      <!-- ACK Rust → Python -->
+      <g class="node" transform="translate(450,1160)">
+        <rect class="box" rx="12" ry="12" width="300" height="80" />
+        <text x="150" y="32" text-anchor="middle">Rust reenvía ACK a Python</text>
+        <text class="small" x="150" y="56" text-anchor="middle">UI habilita siguiente comando</text>
+      </g>
+
+      <!-- Decision: ACK recibido por Python -->
+      <g class="node" transform="translate(450,1280)">
+        <polygon class="decision" points="150,0 300,50 150,100 0,50" />
+        <text x="150" y="40" text-anchor="middle">¿ACK recibido</text>
+        <text x="150" y="62" text-anchor="middle">antes de 5s?</text>
+      </g>
+
+      <!-- Timeout/Error -->
+      <g class="node" transform="translate(80,1268)">
+        <rect class="error" rx="12" ry="12" width="260" height="126" />
+        <text x="130" y="48" text-anchor="middle">Timeout / Error</text>
+        <text class="small" x="130" y="74" text-anchor="middle">Liberar bandera y notificar</text>
+      </g>
+
+      <!-- Fin OK -->
+      <g class="node" transform="translate(450,1410)">
+        <rect class="terminator" rx="12" ry="12" width="300" height="60" />
+        <text x="150" y="36" text-anchor="middle">Fin (Servo libre / listo)</text>
+      </g>
+
+      <!-- Edges -->
+      <path class="arrow" d="M600,100 L600,138" />
+      <path class="arrow" d="M600,220 L600,258" />
+      <path class="arrow-err" d="M540,310 C400,310 360,310 280,310" />
+      <text class="label" x="360" y="296">No</text>
+      <path class="arrow-ok" d="M660,310 C800,310 840,310 900,310" />
+      <text class="label" x="840" y="296">Sí</text>
+      <path class="arrow" d="M900,310 C900,360 600,360 600,398" />
+
+      <path class="arrow" d="M600,480 L600,518" />
+      <path class="arrow-err" d="M540,570 C400,570 360,570 280,570" />
+      <text class="label" x="360" y="556">No</text>
+      <path class="arrow-ok" d="M660,570 C800,570 840,570 900,570" />
+      <text class="label" x="840" y="556">Sí</text>
+      <path class="arrow" d="M900,570 C900,620 600,620 600,658" />
+
+      <path class="arrow" d="M600,740 L600,778" />
+      <path class="arrow-err" d="M540,830 C400,830 360,830 280,830" />
+      <text class="label" x="360" y="816">No</text>
+      <path class="arrow-ok" d="M660,830 C800,830 840,830 900,830" />
+      <text class="label" x="840" y="816">Sí</text>
+      <path class="arrow" d="M900,830 C900,890 600,890 600,918" />
+
+      <path class="arrow" d="M600,1004 L600,1038" />
+      <path class="arrow" d="M600,1120 L600,1158" />
+      <path class="arrow" d="M600,1240 L600,1278" />
+      <path class="arrow-err" d="M540,1330 C400,1330 360,1330 280,1330" />
+      <text class="label" x="360" y="1316">No</text>
+      <path class="arrow-ok" d="M660,1330 C800,1330 840,1330 900,1330" />
+      <text class="label" x="840" y="1316">Sí</text>
+      <path class="arrow-ok" d="M900,1330 C900,1390 600,1390 600,1408" />
+
+      <!-- Inline cues on edges -->
+      <text class="label" x="610" y="345">Envío: SERVOS,RONZA,120*5A</text>
+      <text class="label" x="610" y="605">Rust → Unity</text>
+      <text class="label" x="610" y="865">Checksum OK</text>
+      <text class="label" x="610" y="1080">ACK,RONZA*XX</text>
+
+    </svg>
+
+    <p class="hint">Topología recordatorio: Python ⇄ Router (Ethernet), Rust ⇄ Router (WiFi), Unity ⇄ Router (WiFi). El diagrama refleja decisiones lógicas del flujo extremo a extremo.</p>
+  </div>
+</main>
+</body>
+</html>
