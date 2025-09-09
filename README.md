@@ -1,72 +1,120 @@
-Control de Torreta con Python, Rust y Unity
+use std::net::{TcpListener, TcpStream};
+use std::io::{self, Read, Write};
+use std::str;
+use std::thread;
+use std::collections::HashMap;
+use std::sync::Mutex;
 
-Descripción
+lazy_static::lazy_static! {
+    static ref SERVO_VALUES: Mutex> = {
+        let mut map = HashMap::new();
+        map.insert("RONZA".to_string(), "0".to_string());
+        map.insert("ELEVACION".to_string(), "0".to_string());
+        Mutex::new(map)
+    };
+}
 
-Este proyecto implementa un sistema de control para la torreta DT12, permitiendo manejar sus movimientos de Ronza (horizontal) y Elevación (vertical).
+fn calculate_nmea_checksum(data: &str) -> u8 {
+    let mut checksum: u8 = 0;
+    for byte in data.bytes() {
+        checksum ^= byte;
+    }
+    checksum
+}
 
-La arquitectura combina:
+fn handle_client(mut stream: TcpStream) {
+    println!("Cliente conectado desde: {}", stream.peer_addr().unwrap());
+    let mut buffer = [0; 256];
 
-Python (Tkinter) → Cliente con interfaz gráfica para enviar comandos y recibir retroalimentación.
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("Cliente desconectado: {}", stream.peer_addr().unwrap());
+                return;
+            }
+            Ok(bytes_read) => {
+                let received = str::from_utf8(&buffer[..bytes_read])
+                    .unwrap_or_default()
+                    .trim_matches(char::from(0))
+                    .trim();
 
-Rust → Servidor/cliente intermedio (middleware) que gestiona la comunicación TCP/IP y la sincronización.
+                println!("Recibido: {}", received);
 
-Unity → Simulación/visualización 3D de la torreta DT12, que ejecuta los movimientos recibidos y responde con confirmaciones (ACK).
+                if received.starts_with("$") && received.contains("*") {
+                    let parts: Vec<&str> = received.split('*').collect();
+                    if parts.len() == 2 {
+                        let data = parts[0].trim_start_matches("$");
+                        let data_parts: Vec<&str> = data.split(',').collect();
 
-La comunicación se establece sobre TCP/IP, soportando conexiones Ethernet y WiFi a través de un router central.
+                        if data_parts.len() >= 2 {
+                            let servo_type = data_parts[1];
+                            let servo_value = data_parts.get(2).unwrap_or(&"0");
 
-Topología de Red
+                            let mut values = SERVO_VALUES.lock().unwrap();
+                            if values.contains_key(servo_type) {
+                                values.insert(servo_type.to_string(), servo_value.to_string());
+                            }
+                            drop(values);
 
-Cliente Python: conectado por Ethernet al router.
+                            let response_to_python = format!("$ACK,{}*{:02X}\r\n", servo_type, 0);
+                            match stream.write_all(response_to_python.as_bytes()) {
+                                Ok(_) => println!("Enviado ACK a Python: {}", response_to_python.trim()),
+                                Err(e) => {
+                                    eprintln!("Error al enviar ACK: {}", e);
+                                    return;
+                                }
+                            }
+                            
+                            let destination_addr = "192.168.0.249:9090";
+                            match TcpStream::connect(destination_addr) {
+                                Ok(mut dest_stream) => {
+                                    let values = SERVO_VALUES.lock().unwrap();
+                                    let ronza_val = values.get("RONZA").unwrap();
+                                    let elevacion_val = values.get("ELEVACION").unwrap();
+                                    
+                                    let nmea_data = format!("ACK,{},{}", ronza_val, elevacion_val);
+                                    let checksum = calculate_nmea_checksum(&nmea_data);
+                                    let full_nmea_frame = format!("${}*{:02X}\r\n", nmea_data, checksum);
 
-Servidor Rust: conectado por WiFi al router.
+                                    match dest_stream.write_all(full_nmea_frame.as_bytes()) {
+                                        Ok(_) => println!("Trama NMEA enviada a {}: {}", destination_addr, full_nmea_frame.trim()),
+                                        Err(e) => eprintln!("Error al enviar datos a {}: {}", destination_addr, e),
+                                    }
+                                }
+                                Err(e) => {
+                                    eprintln!("Error al conectar con {}: {}", destination_addr, e);
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    eprintln!("Trama NMEA no válida o incompleta: {}", received);
+                }
+            }
+            Err(e) => {
+                eprintln!("Error de lectura: {}", e);
+                return;
+            }
+        }
+    }
+}
 
-Unity DT12: conectado por WiFi al router.
+fn main() -> io::Result<()> {
+    let listen_addr = "192.168.0.20:9090";
+    let listener = TcpListener::bind(listen_addr)?;
 
-El router actúa como nodo central de la red local, enlazando los tres componentes.
+    println!("Servidor Rust escuchando en {}", listen_addr);
 
-Flujo de Comunicación
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                thread::spawn(|| handle_client(stream));
+            }
+            Err(e) => {
+                eprintln!("Error al aceptar la conexión: {}", e);
+            }
+        }
+    }
 
-El usuario ingresa un comando en la UI de Python.
-
-Python genera una trama NMEA con formato:
-
-TIPO,EJE,VALOR*CHECKSUM\r\n
-
-
-Ejemplos:
-
-SERVOS,RONZA,120*5A
-
-SERVOS,ELEVACION,60*3F
-
-SPEED,SPEED,50*6B
-
-Python envía la trama al servidor Rust.
-
-Rust valida y reenvía la trama al Unity DT12.
-
-Unity mueve la torreta y responde con ACK (ejemplo: ACK,RONZA*XX).
-
-Rust reenvía el ACK al cliente Python, liberando el servo para nuevos comandos.
-
-En caso de error o ausencia de respuesta, se generan NACK o Timeouts (5s).
-
-Componentes principales
-
-Python (Tkinter): interfaz gráfica, generación de tramas, gestión de estados.
-
-Rust: middleware con Mutex<HashMap> para la sincronización, servidor TCP hacia Python y cliente TCP hacia Unity.
-
-Unity: motor de simulación que interpreta comandos NMEA y ejecuta los movimientos de la torreta DT12.
-
-Características
-
-Control de Ronza y Elevación (paso a paso o continuo).
-
-Ajuste de velocidad de movimiento.
-
-Retroalimentación en tiempo real mediante ACK.
-
-Manejo de timeouts y errores de conexión.
-
-Interfaz gráfica intuitiva en Python.
+    Ok(())
+}
